@@ -1,59 +1,68 @@
-// increment_array.cu
-// CUDA program to increment each element of an array by 1
-
 #include <iostream>
-using namespace std;
+#include <cuda_runtime.h>
 
-// CUDA kernel function to increment each element
-__global__ void increment(int *arr, int n) {
-    // Each thread calculates its own index
+// CUDA kernel to increment each array element
+__global__ void incrementArray(int *arr, int size) {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
-
-    // Make sure we don't access out of bounds
-    if (idx < n) {
-        arr[idx] = arr[idx] + 1;
+    if (idx < size) {
+        arr[idx] += 1;
     }
 }
 
 int main() {
-    // Number of elements in the array
-    int n = 10;
+    int N = 1000000; // Make array bigger for better timing
 
-    // Allocate memory for array on CPU (host)
-    int *h_arr = new int[n];
-
-    // Initialize array with some values
-    for (int i = 0; i < n; ++i) {
-        h_arr[i] = i;
+    int *h_array = new int[N];
+    for (int i = 0; i < N; ++i) {
+        h_array[i] = i;
     }
 
-    // Allocate memory for array on GPU (device)
-    int *d_arr;
-    cudaMalloc(&d_arr, n * sizeof(int));
+    int *d_array;
+    cudaMalloc(&d_array, N * sizeof(int));
+    cudaMemcpy(d_array, h_array, N * sizeof(int), cudaMemcpyHostToDevice);
 
-    // Copy data from CPU to GPU
-    cudaMemcpy(d_arr, h_arr, n * sizeof(int), cudaMemcpyHostToDevice);
+    int threadsPerBlock = 256;
+    int blocksPerGrid = (N + threadsPerBlock - 1) / threadsPerBlock;
 
-    // Define block size and grid size
-    int blockSize = 256;                      // Number of threads in a block
-    int gridSize = (n + blockSize - 1) / blockSize; // Number of blocks needed
+    // Create CUDA events for timing
+    cudaEvent_t start, stop;
+    cudaEventCreate(&start);
+    cudaEventCreate(&stop);
+
+    // Record the start event
+    cudaEventRecord(start);
 
     // Launch the kernel
-    increment<<<gridSize, blockSize>>>(d_arr, n);
+    incrementArray<<<blocksPerGrid, threadsPerBlock>>>(d_array, N);
 
-    // Copy the result back from GPU to CPU
-    cudaMemcpy(h_arr, d_arr, n * sizeof(int), cudaMemcpyDeviceToHost);
+    // Record the stop event
+    cudaEventRecord(stop);
 
-    // Print the updated array
-    cout << "Incremented array:" << endl;
-    for (int i = 0; i < n; ++i) {
-        cout << h_arr[i] << " ";
+    // Wait until stop event completes
+    cudaEventSynchronize(stop);
+
+    // Calculate elapsed time between events
+    float milliseconds = 0;
+    cudaEventElapsedTime(&milliseconds, start, stop);
+
+    // Copy the result back to host
+    cudaMemcpy(h_array, d_array, N * sizeof(int), cudaMemcpyDeviceToHost);
+
+    // Print benchmark result
+    std::cout << "Kernel execution time: " << milliseconds << " ms" << std::endl;
+
+    // (Optional) Print few elements to confirm correctness
+    std::cout << "First 5 elements after incrementing: ";
+    for (int i = 0; i < 5; ++i) {
+        std::cout << h_array[i] << " ";
     }
-    cout << endl;
+    std::cout << std::endl;
 
-    // Free the memory on GPU and CPU
-    cudaFree(d_arr);
-    delete[] h_arr;
+    // Free memory
+    cudaFree(d_array);
+    delete[] h_array;
+    cudaEventDestroy(start);
+    cudaEventDestroy(stop);
 
     return 0;
 }
